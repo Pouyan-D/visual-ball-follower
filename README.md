@@ -119,11 +119,6 @@ The detector is independent of ROS, so its synthetic-image tests can run on a wo
 python3 -m pytest -q tests/test_vision.py
 ```
 
-ROS integration and real-hardware driving have **not** been automatically tested in this repository.
-
-## Demo and evaluation
-
-Demo footage and measured speed/accuracy are **not yet included**. When you have your own video, add a short demo (or a link) and document light conditions, image resolution, detection failures and robot behavior. Do not imply that unmeasured performance was benchmarked.
 
 ## Author
 
