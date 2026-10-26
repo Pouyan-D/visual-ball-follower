@@ -1,125 +1,104 @@
-# TurtleBot3 Visual Ball Following — ROS 2 + OpenCV
+# TurtleBot3 Visual Ball Follower
 
-A compact ROS 2 Python package for **camera-based orange-ball detection and reactive following** on a TurtleBot3 Burger. Uses HSV segmentation, geometric contour filtering and proportional steering; no neural network, LiDAR or SLAM is required for this particular task.
+A ROS 2 computer vision and robot control project that enables a TurtleBot3 Burger to detect and follow an orange ball using a monocular camera.
 
-> **Project status:** reconstructed from an earlier TurtleBot3 ball-following experiment (ROS 2 Humble, Ubuntu 22.04). Pure vision unit tests are provided. This packaged version has **not** been retested on physical TurtleBot3 hardware, so no hardware performance or success rate is claimed. Replace/compare the reconstruction with the original implementation before describing it as a validated deployment.
+## Features
 
-## Overview
+- Real-time orange ball detection using OpenCV
+- HSV color segmentation and morphological filtering
+- Contour detection and circularity validation
+- Separate perception and control ROS 2 nodes
+- Proportional steering with exponential smoothing
+- Velocity commands published through `/cmd_vel`
+- Stop command when a no-ball detection message is received
 
-```mermaid
-flowchart LR
-    A[Camera /camera/image_raw] --> B[ROS 2 image subscriber]
-    B --> C[OpenCV HSV threshold + morphology]
-    C --> D[Contour filtering + ball center]
-    D --> E[Proportional steering + safety watchdog]
-    E --> F[ROS 2 /cmd_vel]
-    F --> G[TurtleBot3 Burger]
-```
+## System Architecture
 
-| Setting | Value |
-|---|---|
-| Robot | TurtleBot3 Burger |
-| Target software | Ubuntu 22.04 / ROS 2 Humble |
-| Input | `/camera/image_raw` (`sensor_msgs/msg/Image`) |
-| Output | `/cmd_vel` (`geometry_msgs/msg/Twist`) |
-| Detection | Orange HSV `[6,110,110]`–`[25,255,255]` |
-| Filter | Largest valid contour, area >400 px², radius >15 px, circularity >0.6 |
-| Steering | `angular.z = 0.004 * horizontal_pixel_error`, clipped to ±1.0 rad/s |
-| Forward speed | Conservative **example** `0.08 m/s`, only when reasonably centered. Original forward-speed value not verified. |
+Camera (`/image_raw`)
+       |
+       v
+Perception Node
+       |
+       | `/ball_detection`
+       | geometry_msgs/Point
+       v
+Controller Node
+       |
+       | `/cmd_vel`
+       | geometry_msgs/Twist
+       v
+TurtleBot3 Burger
 
-## Repository layout
+## Technologies
 
-```text
-ros2-visual-ball-follower/
-├── ball_follower/
-│   ├── ball_follower/
-│   │   ├── image_subscriber.py    # ROS 2 node and safety logic
-│   │   └── vision.py              # Pure OpenCV detection
-│   ├── config/ball_follower.yaml
-│   ├── launch/ball_follower.launch.py
-│   ├── package.xml
-│   ├── setup.cfg
-│   ├── setup.py
-│   └── resource/ball_follower
-├── tests/test_vision.py           # Pure Python vision tests
-├── docs/architecture.md
-└── README.md
-```
+- Python 3
+- ROS 2 Humble
+- OpenCV
+- NumPy
+- cv_bridge
+- TurtleBot3 Burger
 
-## Prerequisites
+## Detection Algorithm
 
-- ROS 2 **Humble** sourced on Ubuntu 22.04
-- Python 3 with `numpy`, `cv2`, ROS packages `rclpy`, `cv_bridge`, `sensor_msgs`, `geometry_msgs`
-- Camera node publishing `sensor_msgs/msg/Image` on `/camera/image_raw`
-- TurtleBot3 bringup providing a `geometry_msgs/msg/Twist` consumer on `/cmd_vel` (confirm the actual message type)
+The perception node uses HSV color thresholds to segment the orange ball.
 
-Install the usual system packages if missing:
+Detection candidates are filtered using:
 
-```bash
-sudo apt update
-sudo apt install -y ros-humble-cv-bridge python3-opencv python3-numpy python3-pytest python3-colcon-common-extensions
-```
+- Minimum radius: 15 pixels
+- Minimum contour area: 400 pixels²
+- Minimum circularity: 0.6
 
-## Build in a clean workspace
+Valid detections publish the ball's image coordinates and radius.
 
-Unpack or clone this repository beneath `~/ball_follow_ws/src/`, then:
+## Robot Control
 
-```bash
-source /opt/ros/humble/setup.bash
-cd ~/ball_follow_ws
-colcon build --symlink-install
-source install/setup.bash
-```
+The controller uses proportional steering with exponential smoothing.
 
-## Running
+Parameters:
 
-First verify the camera and the robot topic type (camera/robot must already be running in their respective terminals):
+- Angular proportional gain: 0.004
+- Smoothing factor: 0.3
+- Maximum angular velocity: 1.0 rad/s
+- Forward velocity: 0.06 or 0.12 m/s
+
+If the perception node reports no ball, the controller publishes a zero-velocity command.
+
+## Running the Project
+
+Requires ROS 2 Humble and the package dependencies.
+
+Build the ROS 2 package using colcon, then source the install environment.
+
+Launch the perception and controller nodes:
 
 ```bash
-ros2 topic list -t | grep -E 'image_raw|cmd_vel'
-ros2 topic hz /camera/image_raw
-ros2 topic info -v /cmd_vel
+ros2 launch ball_follower catch_the_ball.launch.py
 ```
 
-**Safe default: this package does not command motion until you explicitly enable it.**
+The perception node expects camera images on `/image_raw`.
 
-```bash
-# Observe detection without issuing movement commands
-ros2 launch ball_follower ball_follower.launch.py
+## Validation
 
-# After checking robot topic types and placing it in a safe, clear area:
-ros2 launch ball_follower ball_follower.launch.py enable_motion:=true
-```
+- Original implementation previously operated with a TurtleBot3
+- ROS 2 package builds successfully
+- All three ROS 2 executables are registered
+- Offline `/ball_detection` to `/cmd_vel` controller tests passed
+- Six unit tests passed for the auxiliary OpenCV vision module
 
-Parameters can be changed in `ball_follower/config/ball_follower.yaml`; launch overrides `enable_motion` explicitly.
+## Known Limitations
 
-### Safety
-
-- Start with wheels lifted or the robot in a controlled test area; keep an emergency stop available.
-- This is color-based reactive control, **not obstacle avoidance**. Avoid stairs, people, and other hazards.
-- With motion enabled, the node commands zero velocity when a ball disappears or camera frames stop arriving.
-- No automatic distance sensing is implemented. A visually detected ball can still be too close for safe forward movement.
-- Verify camera topics, frame dimensions, and the `/cmd_vel` message type for your platform before testing.
-
-## Algorithm
-
-1. Convert each image from BGR to HSV.
-2. Threshold for an orange ball and apply three erosion/dilation iterations.
-3. Find contours; keep those satisfying area, radius and circularity constraints.
-4. Use horizontal distance from image center as a proportional steering error.
-5. Publish commands only when motion is enabled, detection is recent, and camera frames are fresh.
-
-See [architecture notes](docs/architecture.md) for trade-offs and next steps.
-
-## Tests
-
-The detector is independent of ROS, so its synthetic-image tests can run on a workstation:
-
-```bash
-python3 -m pytest -q tests/test_vision.py
-```
-
+- HSV detection is sensitive to changing lighting
+- The controller assumes a 640-pixel-wide image
+- No watchdog currently handles complete loss of detection messages
+- Forward motion does not use distance-based stopping
+- The updated GitHub package has not yet been retested on physical hardware
 
 ## Author
 
-Pouyan Damghani — [LinkedIn](https://www.linkedin.com/in/pouyan-damghani-b18134325/) | [GitHub](https://github.com/Pouyan-D)
+Pouyan Damghani
+
+M.Sc. Digital Technologies
+
+Computer Vision | Robotics | Machine Learning
+
+[LinkedIn](https://www.linkedin.com/in/pouyan-damghani-b18134325/)
