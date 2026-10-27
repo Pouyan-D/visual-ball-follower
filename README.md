@@ -83,7 +83,6 @@ The perception node expects camera images on `/image_raw`.
 - ROS 2 package builds successfully
 - All three ROS 2 executables are registered
 - Offline `/ball_detection` to `/cmd_vel` controller tests passed
-- Six unit tests passed for the auxiliary OpenCV vision module
 
 ## Known Limitations
 
